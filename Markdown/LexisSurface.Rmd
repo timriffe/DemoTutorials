@@ -1,0 +1,219 @@
+---
+title: "Lexis Surfaces"
+author: "Tim Riffe"
+date: "7/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This tutorial gives code for some basic diagnostic Lexis surfaces. We'll use HMD data as an example. In general, we'll want to start from a tidy data format with columns for year, age, and the variable of interest. I'll also give a code snippet for transforming a data matrix into such a tidy format. 
+
+# Example data
+
+This is how I got the data, FYI, but you can load the data straight from this repository in the following code chunk.
+```{r, eval = FALSE}
+library(HMDHFDplus)
+library(readr)
+MX <- readHMDweb("CZE","Mx_1x1",us,pw)
+write_csv(MX, file = "MX.csv")
+```
+
+You can read in straight from github using this:
+
+```{r}
+library(tidyverse)
+library(readr)
+MX <- read_csv("https://raw.githubusercontent.com/timriffe/DemoTutorials/master/Data/MX.csv")
+```
+
+# Make a simple surface
+
+Weĺl compose the Lexis plot in steps, taking care of details one at a time. At the end the same plot will be built in a single statement that would otherwise be harder to explain. 
+
+Here's the basic setup that we'll end up modifying some. We use `geom_tile()` to map fill color to the value on the surface we want to plot. 
+```{r}
+MX %>% 
+  ggplot(aes(x = Year, y = Age, fill = Male)) + 
+  geom_tile()
+```
+
+We'll have to modify the plot quite a bit to get a signal out of it. Namely, these empirical $m(x)$ values can get well over 1 in the highest ages, so they drown out the variation below. You could do `log(Male)` and that'd help some, but the breaks wouldn't be good. One thing at a time. First we'll be explicit about color choices.
+
+## Choose a color palette
+
+Use a sequential palette for absolute or log quantities plotted on the surface. Note the name of the palette you want
+
+```{r}
+library(colorspace)
+hcl_palettes(type = "sequential",plot = TRUE)
+```
+
+Use a divergent palette for log rate ratios, or differences, usually it makes sense to choose a neutral color (ratio = 1 or difference = 0) that matches your background...
+
+```{r}
+hcl_palettes(type = "diverging",plot = TRUE)
+```
+
+This palette system plays nicely together with `ggplot2`. `scale_fill_continuous_sequential()` applies the selected sequential palette.
+
+```{r}
+MX %>% 
+  ggplot(aes(x = Year, y = Age, fill = Male)) + 
+  geom_tile() +
+  scale_fill_continuous_sequential(palette = "BurgYl")
+```
+
+And get a good color signal but bad breaks by logging:
+
+```{r}
+MX %>% 
+  ggplot(aes(x = Year, y = Age, fill = log(Male))) + 
+  geom_tile() +
+  scale_fill_continuous_sequential(palette = "BurgYl")
+```
+
+Here the breaks apply to the logged values, and we don't really have an intuitive sense of what $e^{-2.5}$ is. So we can instead feed a palette to `scale_gradientn()`. We feed a vector of colors, picking out our palette using `sequential_hcl(palette = "BurgYl",n=10)`, which gets the colors backwards, hence the `%>% rev()` statement. Finally, we tell it to pick breaks that play well with log base ten.
+
+```{r, warning = FALSE}
+
+MX %>% 
+  ggplot(aes(x = Year + .5, 
+             y = Age + .5, 
+             fill = Male)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = sequential_hcl(palette = "BurgYl", n = 10) %>% rev(),
+                       trans = "log10")
+```
+
+And again, making the scientific notation go away. This result is good enough for me. For something more custom you'd need to specify a manual vector of labels. Let's not waste more time on it now.
+
+```{r, message = FALSE, warning = FALSE}
+library(scales)
+MX %>% 
+  ggplot(aes(x = Year + .5, 
+             y = Age + .5, 
+             fill = Male)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = sequential_hcl(palette = "BurgYl",n=10) %>% rev(),
+                       trans= "log10", 
+                       labels = comma)
+```
+
+## Center Lexis cells
+
+Now let's enforce an equal aspect ration (one year is one age) on the surface, and manage a detail to ensure the squares are centered. To do this, we add $1/2$ an interval to each year and age. Here it's an easy half because we're in single age data, but further thought might be require to center data in other bins.
+
+```{r, warning = FALSE, message = FALSE}
+
+yrs <- MX$Year %>% range()
+
+MX %>% 
+  ggplot(aes(x = Year + .5, 
+             y = Age + .5, 
+             z = Male,
+             fill = Male)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = sequential_hcl(palette = "BurgYl", n = 10) %>% rev(),
+                       trans= "log10", 
+                       labels = comma)+
+  coord_equal() +
+  xlim(yrs[1],yrs[2] + 1) +
+  ylim(0,111) 
+```
+
+## Add contours 
+
+Adding contours can enhance pattern detection for this sort of gradual smooth surface. We'll feed a slightly different vector of breaks to get more definition.
+
+```{r, warning = FALSE}
+my_breaks = 10^seq(0,-7,by = -.5)
+
+MX %>% 
+  ggplot(aes(x = Year + .5, 
+             y = Age + .5, 
+             z = Male,
+             fill = Male)) +
+  geom_tile() +
+  geom_contour(breaks = my_breaks, color = gray(.8), alpha = 50, size = .5) +
+  scale_fill_gradientn(colors = sequential_hcl(palette = "BurgYl", n = 10) %>% rev(),
+                       trans = "log10", 
+                       labels = comma)+
+  coord_equal() +
+  xlim(yrs[1],yrs[2] + 1) +
+  ylim(0,111) 
+```
+
+## More details
+
+Finally let's get rid of the gray background, and clean up axis labels
+
+```{r, warning = FALSE}
+MX %>% 
+  ggplot(aes(x = Year + .5, 
+             y = Age + .5, 
+             z = Male,
+             fill = Male)) +
+  geom_tile() +
+  geom_contour(breaks = my_breaks, color = gray(.8), alpha = 50, size = .5) +
+  scale_fill_gradientn(colors = sequential_hcl(palette = "BurgYl", n = 10) %>% rev(),
+                       trans = "log10", 
+                       labels = comma)+
+  coord_equal() +
+  xlim(yrs[1],yrs[2] + 1) +
+  ylim(0,111) +
+  xlab("Year") +
+  ylab("Age") +
+  theme_minimal()+
+  labs(fill="Mortality rate\n(log colors)")
+```
+
+# Diverging Lexis plot
+
+Say we want to make a plot of residuals, differences, or ratios (logged, say). The only thing that changes is picking out a divergent palette. Here I'll calculate year-on-year within-age changes in $ln(m(x))$.
+
+```{r}
+
+# shift back before joining
+MX2 <- 
+  MX %>% 
+  mutate(Year = Year - 1,
+         mx_previous = Male) %>% 
+  select(Year, Age, mx_previous)
+
+MX %>% 
+  mutate(mx_now = Male) %>% 
+  select(Year, Age, mx_now) %>% 
+  left_join(MX2, by = c("Year","Age")) %>% 
+  mutate(lrat = log(mx_now / mx_previous),
+         lrat = case_when(lrat < -.5 ~ -.5,
+                           lrat > .5 ~ .5,
+                           TRUE ~ lrat)) %>% 
+  ggplot(aes(x = Year, y = Age, fill = lrat)) +
+  geom_tile() +
+  scale_fill_continuous_diverging("Blue-Red3")+
+  coord_equal()
+```
+
+Sex ratios are also a good Lexis surface diagnostic sometimes
+
+```{r}
+MX %>% 
+  mutate(lrat = log(Male / Female),
+         lrat = case_when(lrat < -1 ~ -1,
+                           lrat > 1 ~ 1,
+                           TRUE ~ lrat)) %>% 
+  ggplot(aes(x = Year, y = Age, fill = lrat)) +
+  geom_tile() +
+  scale_fill_continuous_diverging("Blue-Red3") +
+  coord_equal()
+```
+
+
+
+
+
